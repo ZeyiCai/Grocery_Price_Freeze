@@ -1,0 +1,436 @@
+---
+title: "My title"
+subtitle: "My subtitle if needed"
+author: 
+  - First author
+  - Another author
+thanks: "Code and data are available at: [https://github.com/RohanAlexander/starter_folder](https://github.com/RohanAlexander/starter_folder)."
+date: today
+date-format: long
+abstract: "First sentence. Second sentence. Third sentence. Fourth sentence."
+format: pdf
+number-sections: true
+bibliography: references.bib
+---
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+
+#### Workspace setup ####
+set.seed(304)
+library(tidyverse)
+library(rstanarm)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(bayesplot)
+```
+
+
+# Introduction
+
+Overview paragraph
+
+Estimand paragraph
+
+Results paragraph
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| label: tbl-aerial_preview
+#| tbl-cap: " "
+
+#### Combine the csv. file ####
+# Read the CSV files
+raw <- read.csv("~/grocery_price_freeze/data/01-raw_data/raw.csv", stringsAsFactors = FALSE)
+product <- read.csv("~/grocery_price_freeze/data/01-raw_data/product.csv", stringsAsFactors = FALSE)
+
+# Combine the files
+raw_data <- left_join(raw, product, by = c("product_id"="id"))
+
+# Save the combined file
+write.csv(raw_data, "~/grocery_price_freeze/data/01-raw_data/raw_data.csv", row.names = FALSE)
+```
+
+Why it matters paragraph
+
+Telegraphing paragraph: The remainder of this paper is structured as follows. @sec-data....
+
+
+
+
+
+
+# Data {#sec-data}
+```{r}
+# Remove rows with missing values
+cleaned_data <- 
+  raw_data |>
+    drop_na(current_price, product_id) |>
+    mutate(
+      current_price = as.numeric(current_price),
+      price_per_unit = as.numeric(str_remove_all(price_per_unit, "\\$|/gram|/100g|ea\\.|\\s"))
+    )
+
+print(cleaned_data)
+
+#### Save data ####
+write_csv(cleaned_data, "~/grocery_price_freeze/data/02-analysis_data/analysis_data.csv")
+
+# Plot price trends over time
+ggplot(cleaned_data, aes(x = nowtime, y = current_price, color = product_name)) +
+  geom_line() +
+  labs(title = "Price Trends Over Time", x = "Time", y = "Current Price") +
+  theme_minimal()
+
+
+```
+
+
+## Overview
+
+We use the statistical programming language R [@citeR].... Our data [@shelter].... Following @tellingstories, we consider...
+
+Overview text
+
+## Measurement
+	
+Some paragraphs about how we go from a phenomena in the world to an entry in the dataset.
+
+## Outcome variables
+
+Add graphs, tables and text. Use sub-sub-headings for each outcome variable or update the subheading to be singular.
+
+
+
+Some of our data is of penguins (@fig-bills), from @palmerpenguins.
+
+```{r}
+#| label: fig-bills
+#| fig-cap: Bills of penguins
+#| echo: false
+
+ggplot(penguins, aes(x = island, fill = species)) +
+  geom_bar(alpha = 0.8) +
+  scale_fill_manual(values = c("darkorange","purple","cyan4"),
+                    guide = "none") +
+  theme_minimal() +
+  facet_wrap(~species, ncol = 1) +
+  coord_flip()
+```
+
+Talk more about it.
+
+And also planes (@fig-planes). (You can change the height and width, but don't worry about doing that until you have finished every other aspect of the paper - Quarto will try to make it look nice and the defaults usually work well once you have enough text.)
+
+```{r}
+#| label: fig-planes
+#| fig-cap: Relationship between wing length and width
+#| echo: false
+#| warning: false
+#| message: false
+
+analysis_data <- read_csv(here::here("data/02-analysis_data/analysis_data.csv"))
+
+analysis_data |> 
+  ggplot(aes(x = width, y = length)) +
+  geom_point(alpha = 0.8) +
+  theme_minimal() +
+  labs(x = "Wing width (mm)",
+       y = "Wing length (mm)")
+```
+
+Talk way more about it. 
+
+## Predictor variables
+
+Add graphs, tables and text.
+
+Use sub-sub-headings for each outcome variable and feel free to combine a few into one if they go together naturally.
+
+
+
+
+
+
+
+
+# Model
+```{r}
+#### Read data ####
+analysis_data <- read_csv("~/grocery_price_freeze/data/02-analysis_data/analysis_data.csv", 
+                          show_col_types = FALSE)
+analysis_data <- analysis_data %>%
+  filter(!is.na(price_per_unit), !is.na(old_price))
+
+# Verify the number of rows
+cat("Number of rows in the dataset:", nrow(analysis_data), "\n")
+
+# Inspect the first few rows
+head(analysis_data)
+
+#### Fit a Bayesian regression model ####
+bayesian_model <- stan_glm(
+  formula = current_price ~ price_per_unit + old_price,
+  data = analysis_data,
+  family = gaussian(),
+  prior = normal(location = 0, scale = 2.5, autoscale = TRUE),
+  prior_intercept = normal(location = 0, scale = 2.5, autoscale = TRUE),
+  prior_aux = exponential(rate = 1, autoscale = TRUE),
+  seed = 302  # Set seed for reproducibility
+)
+
+# View summary of the model
+summary(bayesian_model)
+plot(bayesian_model)
+
+#### Save Model ####
+# Save the fitted model
+saveRDS(bayesian_model, file = "~/grocery_price_freeze/models/bayesian_model.rds")
+
+
+
+#### Predict Using the Model ####
+# Generate predictions
+analysis_data <- analysis_data %>%
+  mutate(predicted_price = predict(bayesian_model, newdata = analysis_data))
+
+# View updated data with predictions
+head(analysis_data)
+
+#### Plot the Model ####
+# Actual vs Predicted Prices
+ggplot(analysis_data, aes(x = current_price, y = predicted_price)) +
+  geom_point(color = "blue", alpha = 0.6) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(
+    title = "Actual vs Predicted Prices",
+    x = "Actual Price",
+    y = "Predicted Price"
+  ) +
+  theme_minimal()
+
+# Relationship Between Predictors and Response
+# Predictor: price_per_unit
+ggplot(analysis_data, aes(x = price_per_unit, y = current_price)) +
+  geom_point(color = "purple", alpha = 0.6) +
+  geom_line(aes(y = predicted_price), color = "orange") +
+  labs(
+    title = "Current Price vs Price Per Unit",
+    x = "Price Per Unit",
+    y = "Current Price"
+  ) +
+  theme_minimal()
+
+# Predictor: old_price
+ggplot(analysis_data, aes(x = old_price, y = current_price)) +
+  geom_point(color = "green", alpha = 0.6) +
+  geom_line(aes(y = predicted_price), color = "orange") +
+  labs(
+    title = "Current Price vs Old Price",
+    x = "Old Price",
+    y = "Current Price"
+  ) +
+  theme_minimal()
+
+
+```
+
+The goal of our modelling strategy is twofold. Firstly,...
+
+Here we briefly describe the Bayesian analysis model used to investigate... Background details and diagnostics are included in [Appendix -@sec-model-details].
+
+## Model set-up
+
+Define $y_i$ as the number of seconds that the plane remained aloft. Then $\beta_i$ is the wing width and $\gamma_i$ is the wing length, both measured in millimeters.  
+
+\begin{align} 
+y_i|\mu_i, \sigma &\sim \mbox{Normal}(\mu_i, \sigma) \\
+\mu_i &= \alpha + \beta_i + \gamma_i\\
+\alpha &\sim \mbox{Normal}(0, 2.5) \\
+\beta &\sim \mbox{Normal}(0, 2.5) \\
+\gamma &\sim \mbox{Normal}(0, 2.5) \\
+\sigma &\sim \mbox{Exponential}(1)
+\end{align}
+
+We run the model in R [@citeR] using the `rstanarm` package of @rstanarm. We use the default priors from `rstanarm`.
+
+
+### Model justification
+
+We expect a positive relationship between the size of the wings and time spent aloft. In particular...
+
+We can use maths by including latex between dollar signs, for instance $\theta$.
+
+
+# Results
+
+Our results are summarized in @tbl-modelresults.
+
+```{r}
+#| echo: false
+#| eval: true
+#| warning: false
+#| message: false
+
+library(rstanarm)
+
+first_model <-
+  readRDS(file = here::here("models/first_model.rds"))
+```
+
+```{r}
+#| echo: false
+#| eval: true
+#| label: tbl-modelresults
+#| tbl-cap: "Explanatory models of flight time based on wing width and wing length"
+#| warning: false
+
+modelsummary::modelsummary(
+  list(
+    "First model" = first_model
+  ),
+  statistic = "mad",
+  fmt = 2
+)
+```
+
+
+
+
+# Discussion
+
+## First discussion point {#sec-first-point}
+
+If my paper were 10 pages, then should be be at least 2.5 pages. The discussion is a chance to show off what you know and what you learnt from all this. 
+
+## Second discussion point
+
+Please don't use these as sub-heading labels - change them to be what your point actually is.
+
+## Third discussion point
+
+## Weaknesses and next steps
+
+Weaknesses and next steps should also be included.
+
+\newpage
+
+\appendix
+
+# Appendix {-}
+
+
+# Additional data details
+
+# Model details {#sec-model-details}
+
+
+## Posterior predictive check
+
+In @fig-ppcheckandposteriorvsprior-1 we implement a posterior predictive check. This shows...
+
+In @fig-ppcheckandposteriorvsprior-2 we compare the posterior with the prior. This shows... 
+
+```{r}
+#| eval: true
+#| echo: false
+#| message: false
+#| warning: false
+#| label: fig-ppcheckandposteriorvsprior
+#| layout-ncol: 2
+#| fig-cap: "Examining how the model fits, and is affected by, the data"
+#| fig-subcap: ["Posterior prediction check", "Comparing the posterior with the prior"]
+
+#### Load required libraries ####
+library(bayesplot)
+library(ggplot2)
+
+#### Posterior Predictive Check ####
+# Draw samples from the posterior predictive distribution
+pp_check(bayesian_model, nsamples = 100) +
+  ggtitle("Posterior Predictive Check: Distribution of Current Price")
+
+#### Coefficient Posterior Distributions ####
+# Plot posterior distributions of model coefficients
+posterior <- as.matrix(bayesian_model)
+mcmc_areas(
+  posterior,
+  pars = c("price_per_unit", "old_price", "(Intercept)"),
+  prob = 0.8  # Highlight 80% credible interval
+) +
+  ggtitle("Posterior Distributions of Coefficients") +
+  theme_minimal()
+
+#### Trace Plots ####
+# Trace plots to diagnose sampling
+mcmc_trace(
+  posterior,
+  pars = c("price_per_unit", "old_price", "(Intercept)")
+) +
+  ggtitle("Trace Plots for Coefficients") +
+  theme_minimal()
+
+#### Actual vs Predicted Values ####
+# Add predictions to data
+analysis_data <- analysis_data %>%
+  mutate(predicted_price = predict(bayesian_model, newdata = analysis_data))
+
+# Plot actual vs predicted prices
+ggplot(analysis_data, aes(x = current_price, y = predicted_price)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Actual vs Predicted Prices",
+    x = "Actual Price",
+    y = "Predicted Price"
+  ) +
+  theme_minimal()
+
+library(bayesplot)
+
+# Extract posterior samples
+posterior <- as.matrix(bayesian_model)
+
+# Plot posterior distributions for coefficients
+mcmc_areas(
+  posterior,
+  pars = c("price_per_unit", "old_price", "(Intercept)"),
+  prob = 0.95  # 95% credible interval
+) +
+  ggtitle("Posterior Distributions of Coefficients") +
+  theme_minimal()
+```
+
+## Diagnostics
+
+@fig-stanareyouokay-1 is a trace plot. It shows... This suggests...
+
+@fig-stanareyouokay-2 is a Rhat plot. It shows... This suggests...
+
+```{r}
+#| echo: false
+#| eval: true
+#| message: false
+#| warning: false
+#| label: fig-stanareyouokay
+#| fig-cap: "Checking the convergence of the MCMC algorithm"
+#| fig-subcap: ["Trace plot", "Rhat plot"]
+#| layout-ncol: 2
+
+plot(first_model, "trace")
+
+plot(first_model, "rhat")
+```
+
+
+
+\newpage
+
+
+# References
+
+
